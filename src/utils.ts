@@ -34,5 +34,6 @@ export function generateOnionAddress() {
 }
 
 export function formatBtc(amount: number) {
-  return `${amount.toFixed(8)} BTC`;
+  const val = typeof amount === 'number' && !isNaN(amount) ? amount : 0;
+  return `${val.toFixed(8)} BTC`;
 }

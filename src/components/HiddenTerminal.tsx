@@ -18,14 +18,47 @@ interface HiddenTerminalProps {
   isOpen: boolean;
   onClose: () => void;
   onUnlock: (type: 'chat' | 'market') => void;
+  onAdminAccess: () => void;
 }
 
-const HiddenTerminal: React.FC<HiddenTerminalProps> = ({ user, isOpen, onClose, onUnlock }) => {
+const HiddenTerminal: React.FC<HiddenTerminalProps> = ({ user, isOpen, onClose, onUnlock, onAdminAccess }) => {
   const [input, setInput] = useState('');
+  const [suggestion, setSuggestion] = useState('');
   const [history, setHistory] = useState<{ type: 'system' | 'command' | 'response' | 'error'; text: string }[]>([
     { type: 'system', text: 'ShadowNet CLI v4.2.0 [Secure Terminal]' },
     { type: 'system', text: 'Type "help" for available commands' },
   ]);
+
+  const COMMANDS = [
+    'help',
+    'status',
+    'chat',
+    'clear',
+    'exit',
+    'admin t',
+    'chat-terminal : activate',
+    'chat-state-true = chat',
+    'market-state-true = market',
+    'exit-chat'
+  ];
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const currentInput = input.toLowerCase();
+      if (!currentInput) return;
+
+      const matches = COMMANDS.filter(cmd => cmd.startsWith(currentInput));
+      if (matches.length === 1) {
+        setInput(matches[0]);
+      } else if (matches.length > 1) {
+        // Cycle through matches or show them in history?
+        // Basic: just pick the first one or do nothing if ambiguous
+        setInput(matches[0]);
+      }
+    }
+  };
+
   const [isActivated, setIsActivated] = useState(false);
   const [chatMode, setChatMode] = useState(false);
   const [activeChat, setActiveChat] = useState<ChatType | null>(null);
@@ -183,6 +216,12 @@ const HiddenTerminal: React.FC<HiddenTerminalProps> = ({ user, isOpen, onClose, 
       statusLines.forEach(line => {
         setHistory(prev => [...prev, { type: 'response', text: line }]);
       });
+    } else if (lowerCmd === 'admin t') {
+      setHistory(prev => [...prev, { type: 'response', text: 'Initializing Admin Gateway...' }]);
+      setTimeout(() => {
+        onAdminAccess();
+        onClose();
+      }, 1000);
     } else if (args[0].toLowerCase() === 'chat') {
       if (args.length === 1) {
         setHistory(prev => [...prev, { type: 'response', text: 'Fetching active chats...' }]);
@@ -474,6 +513,7 @@ const HiddenTerminal: React.FC<HiddenTerminalProps> = ({ user, isOpen, onClose, 
                     type="text"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
                     className="flex-1 bg-transparent border-none outline-none text-cyan-300 placeholder-slate-600 font-mono"
                     autoFocus
                     placeholder={chatMode ? 'Type message...' : 'Enter command...'}

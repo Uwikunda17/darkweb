@@ -38,9 +38,24 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isAuthenticated() && 
-        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
-         (request.auth.token.email == "uwikundac5@gmail.com" && request.auth.token.email_verified == true));
+      return isAuthenticated() && (
+        request.auth.token.email == "uwikundac5@gmail.com" ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) ||
+        request.resource.data.uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('uid' in request.resource.data) ||
+        request.resource.data.uid == resource.data.uid;
     }
 
     function hasRequiredFields(fields) {
@@ -55,11 +70,12 @@ service cloud.firestore {
     // Domain Validators
     // ===============================================================
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'role', 'balance', 'debt', 'points', 'completedModules', 'achievements', 'streak', 'lastActive', 'publicKey', 'privateKey', 'codename']) &&
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'role', 'status', 'balance', 'debt', 'points', 'completedModules', 'achievements', 'streak', 'lastActive', 'publicKey', 'privateKey', 'codename']) &&
              data.uid is string &&
              data.email is string &&
              data.displayName is string &&
              data.role in ['admin', 'user'] &&
+             data.status in ['active', 'banned'] &&
              data.balance is number &&
              data.debt is number &&
              data.points is number &&
@@ -128,15 +144,32 @@ service cloud.firestore {
              (!('read' in data) || data.read is bool);
     }
 
+    function isValidMarketItem(data) {
+      return hasOnlyAllowedFields(['title', 'price', 'category', 'vendorId', 'description', 'imageUrl', 'timestamp']) &&
+             data.title is string && data.title.size() < 100 &&
+             data.price is number && data.price >= 0 &&
+             data.category is string &&
+             data.vendorId is string &&
+             data.description is string && data.description.size() < 1000 &&
+             (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() < 500)) &&
+             (!('timestamp' in data) || data.timestamp is string);
+    }
+
     // ===============================================================
     // Collection Rules
     // ===============================================================
 
     // User Profiles
     match /users/{userId} {
-      allow read: if isAuthenticated(); // Allow reading for PGP key exchange and profile lookups
-      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) && request.resource.data.role == 'user' || isAdmin());
-      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) && request.resource.data.role == resource.data.role || isAdmin());
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && userId == request.auth.uid && isValidUser(request.resource.data) && request.resource.data.status == 'active' && request.resource.data.role == 'user';
+      allow update: if isAuthenticated() && (
+        (userId == request.auth.uid && 
+         request.resource.data.status == resource.data.status && 
+         request.resource.data.role == resource.data.role &&
+         isValidUser(request.resource.data)) || 
+        isAdmin()
+      );
     }
 
     // Vendors
@@ -169,7 +202,8 @@ service cloud.firestore {
     // Market Items
     match /marketItems/{itemId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow create: if isAuthenticated() && isValidMarketItem(request.resource.data) && (request.resource.data.vendorId == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.vendorId == request.auth.uid);
     }
 
     // Training Modules
@@ -196,6 +230,25 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidForumPost(request.resource.data) && (request.resource.data.authorId == request.auth.uid || isAdmin());
       allow update: if isAuthenticated() && isValidForumPost(request.resource.data) && (resource.data.authorId == request.auth.uid || isAdmin());
+    }
+
+    // Orders
+    match /orders/{orderId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    // Services
+    match /services/{serviceId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Settings
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
   }
 }

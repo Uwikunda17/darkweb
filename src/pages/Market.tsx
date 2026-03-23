@@ -17,8 +17,17 @@ const Market: React.FC<MarketProps> = ({ user }) => {
   const [purchaseStatus, setPurchaseStatus] = useState<'idle' | 'processing' | 'success' | 'scam' | 'insufficient'>('idle');
   const [searchQuery, setSearchQuery] = useState('');
   const [category, setCategory] = useState('All');
+  const [isListingModalOpen, setIsListingModalOpen] = useState(false);
+  const [newItem, setNewItem] = useState({
+    title: '',
+    price: '',
+    category: 'Software',
+    description: '',
+    imageUrl: ''
+  });
 
   const categories = ['All', 'Drugs', 'Hacked Accounts', 'Stolen Cards', 'Fake IDs', 'Weapons', 'Software'];
+  const listingCategories = categories.filter(c => c !== 'All');
 
   useEffect(() => {
     const fetchItems = async () => {
@@ -56,11 +65,11 @@ const Market: React.FC<MarketProps> = ({ user }) => {
     fetchItems();
   }, []);
 
-  const handlePurchase = async (acceptDebt: boolean = false) => {
+  const handlePurchase = async () => {
     if (!selectedItem) return;
     
-    // Check balance if not accepting debt
-    if (!acceptDebt && user.balance < selectedItem.price) {
+    // Strict balance check
+    if (user.balance < selectedItem.price) {
       setPurchaseStatus('insufficient');
       return;
     }
@@ -77,23 +86,52 @@ const Market: React.FC<MarketProps> = ({ user }) => {
       setPurchaseStatus('scam');
     } else {
       try {
-        // Update user balance and debt
+        // Update user balance
         const userRef = doc(db, 'users', user.uid);
-        if (acceptDebt) {
-          const remainingDebt = selectedItem.price - user.balance;
-          await updateDoc(userRef, {
-            balance: 0,
-            debt: increment(remainingDebt)
-          });
-        } else {
-          await updateDoc(userRef, {
-            balance: increment(-selectedItem.price)
-          });
-        }
+        await updateDoc(userRef, {
+          balance: increment(-selectedItem.price)
+        });
+        
+        // Record order
+        await addDoc(collection(db, 'orders'), {
+          userId: user.uid,
+          productId: selectedItem.id,
+          productName: selectedItem.title,
+          price: selectedItem.price,
+          status: 'completed',
+          timestamp: new Date().toISOString()
+        });
+
         setPurchaseStatus('success');
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
       }
+    }
+  };
+
+  const handleListItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const itemData = {
+        title: newItem.title,
+        price: parseFloat(newItem.price),
+        category: newItem.category,
+        description: newItem.description,
+        imageUrl: newItem.imageUrl,
+        vendorId: user.uid,
+        timestamp: new Date().toISOString()
+      };
+
+      await addDoc(collection(db, 'marketItems'), itemData);
+      setIsListingModalOpen(false);
+      setNewItem({ title: '', price: '', category: 'Software', description: '', imageUrl: '' });
+      
+      // Refresh items
+      const q = query(collection(db, 'marketItems'));
+      const querySnapshot = await getDocs(q);
+      setItems(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MarketItem)));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'marketItems');
     }
   };
 
@@ -113,6 +151,13 @@ const Market: React.FC<MarketProps> = ({ user }) => {
           <p className="text-[#00ff9d]/50 text-xs uppercase tracking-widest">Secure Escrow Enabled</p>
         </div>
         <div className="flex gap-4 w-full md:w-auto">
+          <button 
+            onClick={() => setIsListingModalOpen(true)}
+            className="px-4 py-2 bg-[#8b0000]/10 border border-[#8b0000]/30 text-[#8b0000] text-[10px] font-bold uppercase tracking-widest hover:bg-[#8b0000] hover:text-white transition-all flex items-center gap-2"
+          >
+            <Lock className="w-3 h-3" />
+            List Item
+          </button>
           <div className="relative flex-1 md:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#00ff9d]/30" />
             <input 
@@ -137,31 +182,128 @@ const Market: React.FC<MarketProps> = ({ user }) => {
         {filteredItems.map(item => (
           <div 
             key={item.id} 
-            className="border border-[#00ff9d]/10 bg-[#0d0d0d] p-6 rounded-sm hover:border-[#8b0000]/50 transition-all group relative overflow-hidden"
+            className="border border-[#00ff9d]/10 bg-[#0d0d0d] rounded-sm hover:border-[#8b0000]/50 transition-all group relative overflow-hidden flex flex-col"
           >
-            <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-30 transition-opacity">
-              <ShoppingCart className="w-12 h-12 text-[#8b0000]" />
-            </div>
-            
-            <span className="text-[8px] uppercase tracking-widest text-[#8b0000] font-bold mb-2 block">{item.category}</span>
-            <h3 className="text-[#00ff9d] font-bold text-lg mb-2 group-hover:text-white transition-colors">{item.title}</h3>
-            <p className="text-[10px] text-[#00ff9d]/50 mb-6 line-clamp-2">{item.description}</p>
-            
-            <div className="flex justify-between items-center mt-auto pt-4 border-t border-[#00ff9d]/5">
-              <div className="flex flex-col">
-                <span className="text-[8px] uppercase text-[#00ff9d]/30">Price</span>
-                <span className="text-[#8b0000] font-bold">{formatBtc(item.price)}</span>
+            {item.imageUrl && (
+              <div className="w-full h-40 overflow-hidden border-b border-[#00ff9d]/5">
+                <img 
+                  src={item.imageUrl} 
+                  alt={item.title} 
+                  className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500" 
+                  referrerPolicy="no-referrer"
+                />
               </div>
-              <button 
-                onClick={() => setSelectedItem(item)}
-                className="px-4 py-2 bg-[#00ff9d]/5 border border-[#00ff9d]/20 text-[#00ff9d] text-[10px] font-bold uppercase tracking-widest hover:bg-[#8b0000] hover:text-white hover:border-[#8b0000] transition-all"
-              >
-                Buy Now
-              </button>
+            )}
+            
+            <div className="p-6 flex-1 flex flex-col">
+              <div className="absolute top-2 right-2 p-2 opacity-10 group-hover:opacity-30 transition-opacity z-10">
+                {!item.imageUrl && <ShoppingCart className="w-12 h-12 text-[#8b0000]" />}
+              </div>
+              
+              <span className="text-[8px] uppercase tracking-widest text-[#8b0000] font-bold mb-2 block">{item.category}</span>
+              <h3 className="text-[#00ff9d] font-bold text-lg mb-2 group-hover:text-white transition-colors">{item.title}</h3>
+              <p className="text-[10px] text-[#00ff9d]/50 mb-6 line-clamp-2">{item.description}</p>
+              
+              <div className="flex justify-between items-center mt-auto pt-4 border-t border-[#00ff9d]/5">
+                <div className="flex flex-col">
+                  <span className="text-[8px] uppercase text-[#00ff9d]/30">Price</span>
+                  <span className="text-[#8b0000] font-bold">{formatBtc(item.price)}</span>
+                </div>
+                <button 
+                  onClick={() => setSelectedItem(item)}
+                  className="px-4 py-2 bg-[#00ff9d]/5 border border-[#00ff9d]/20 text-[#00ff9d] text-[10px] font-bold uppercase tracking-widest hover:bg-[#8b0000] hover:text-white hover:border-[#8b0000] transition-all"
+                >
+                  Buy Now
+                </button>
+              </div>
             </div>
           </div>
         ))}
       </div>
+
+      {/* Listing Modal */}
+      {isListingModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#0d0d0d] border border-[#8b0000] w-full max-w-lg p-8 rounded-sm shadow-[0_0_30px_rgba(139,0,0,0.2)]">
+            <div className="flex justify-between items-start mb-6">
+              <h3 className="text-xl font-bold text-[#00ff9d]">LIST NEW ITEM</h3>
+              <button onClick={() => setIsListingModalOpen(false)} className="text-[#8b0000] hover:text-[#ff0000] transition-colors">
+                <XCircle className="w-6 h-6" />
+              </button>
+            </div>
+
+            <form onSubmit={handleListItem} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[8px] uppercase tracking-widest text-[#00ff9d]/50">Item Title</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={newItem.title}
+                    onChange={(e) => setNewItem({...newItem, title: e.target.value})}
+                    className="w-full bg-black border border-[#00ff9d]/20 rounded-sm py-2 px-3 text-xs text-[#00ff9d] focus:outline-none focus:border-[#00ff9d]/50"
+                    placeholder="e.g. Premium Botnet Access"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[8px] uppercase tracking-widest text-[#00ff9d]/50">Price (BTC)</label>
+                  <input 
+                    type="number" 
+                    step="0.0001"
+                    required
+                    value={newItem.price}
+                    onChange={(e) => setNewItem({...newItem, price: e.target.value})}
+                    className="w-full bg-black border border-[#00ff9d]/20 rounded-sm py-2 px-3 text-xs text-[#00ff9d] focus:outline-none focus:border-[#00ff9d]/50"
+                    placeholder="0.005"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[8px] uppercase tracking-widest text-[#00ff9d]/50">Category</label>
+                <select 
+                  value={newItem.category}
+                  onChange={(e) => setNewItem({...newItem, category: e.target.value})}
+                  className="w-full bg-black border border-[#00ff9d]/20 rounded-sm py-2 px-3 text-xs text-[#00ff9d] focus:outline-none focus:border-[#00ff9d]/50"
+                >
+                  {listingCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[8px] uppercase tracking-widest text-[#00ff9d]/50">Image URL</label>
+                <input 
+                  type="url" 
+                  value={newItem.imageUrl}
+                  onChange={(e) => setNewItem({...newItem, imageUrl: e.target.value})}
+                  className="w-full bg-black border border-[#00ff9d]/20 rounded-sm py-2 px-3 text-xs text-[#00ff9d] focus:outline-none focus:border-[#00ff9d]/50"
+                  placeholder="https://example.com/image.jpg"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[8px] uppercase tracking-widest text-[#00ff9d]/50">Description</label>
+                <textarea 
+                  required
+                  rows={4}
+                  value={newItem.description}
+                  onChange={(e) => setNewItem({...newItem, description: e.target.value})}
+                  className="w-full bg-black border border-[#00ff9d]/20 rounded-sm py-2 px-3 text-xs text-[#00ff9d] focus:outline-none focus:border-[#00ff9d]/50 resize-none"
+                  placeholder="Detailed description of your product..."
+                />
+              </div>
+
+              <button 
+                type="submit"
+                className="w-full py-4 bg-[#8b0000] text-white font-bold uppercase tracking-widest hover:bg-[#a00000] transition-all flex items-center justify-center gap-2 mt-4"
+              >
+                <Shield className="w-4 h-4" />
+                Publish to Market
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Purchase Modal */}
       {selectedItem && (
@@ -221,30 +363,22 @@ const Market: React.FC<MarketProps> = ({ user }) => {
                 <div className="p-4 bg-[#8b0000]/5 border border-[#8b0000]/20 rounded-sm space-y-4">
                   <p className="text-xs text-[#00ff9d]/70 leading-relaxed">
                     You do not have enough BTC in your ShadowNet wallet to complete this transaction. 
-                    You can choose to accept a debt of <span className="text-[#8b0000] font-bold">{formatBtc(selectedItem.price - user.balance)}</span> to proceed.
+                    Please deposit more funds to proceed.
                   </p>
                   <div className="flex items-start gap-3 p-3 bg-[#8b0000]/10 border border-[#8b0000]/30 rounded-sm">
                     <AlertTriangle className="w-5 h-5 text-[#8b0000] shrink-0" />
                     <p className="text-[10px] text-[#8b0000] font-bold uppercase">
-                      WARNING: Unpaid debt will restrict your access to premium services.
+                      TRANSACTION REJECTED BY ESCROW SYSTEM.
                     </p>
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-3">
-                  <button 
-                    onClick={() => handlePurchase(true)}
-                    className="w-full py-4 bg-[#8b0000] text-white font-bold uppercase tracking-widest hover:bg-[#a00000] transition-all"
-                  >
-                    Accept Debt & Purchase
-                  </button>
-                  <button 
-                    onClick={() => { setSelectedItem(null); setPurchaseStatus('idle'); }}
-                    className="w-full py-3 border border-[#00ff9d]/20 text-[#00ff9d]/50 text-[10px] font-bold uppercase tracking-widest hover:bg-[#00ff9d]/5 transition-all"
-                  >
-                    Reject Purchase
-                  </button>
-                </div>
+                <button 
+                  onClick={() => { setSelectedItem(null); setPurchaseStatus('idle'); }}
+                  className="w-full py-4 bg-[#8b0000] text-white font-bold uppercase tracking-widest hover:bg-[#a00000] transition-all"
+                >
+                  Return to Market
+                </button>
               </div>
             )}
 

@@ -128,6 +128,26 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onNavigate }) => {
                         <p className="text-[10px] text-[#00ff9d]/50 line-clamp-2 leading-relaxed">{module.description}</p>
                       </div>
 
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center text-[8px] uppercase tracking-widest">
+                          <span className={status === 'completed' ? 'text-[#00ff9d]' : status === 'in-progress' ? 'text-yellow-500' : 'text-[#00ff9d]/30'}>
+                            {status.replace('-', ' ')}
+                          </span>
+                          <span className="text-[#00ff9d]/30">
+                            {status === 'completed' ? '100%' : status === 'in-progress' ? '50%' : '0%'}
+                          </span>
+                        </div>
+                        <div className="h-1 w-full bg-[#00ff9d]/5 rounded-full overflow-hidden">
+                          <motion.div 
+                            initial={{ width: 0 }}
+                            animate={{ width: status === 'completed' ? '100%' : status === 'in-progress' ? '50%' : '0%' }}
+                            className={`h-full transition-all duration-1000 ${
+                              status === 'completed' ? 'bg-[#00ff9d]' : status === 'in-progress' ? 'bg-yellow-500' : 'bg-transparent'
+                            }`}
+                          />
+                        </div>
+                      </div>
+
                       <div className="pt-4 flex justify-between items-center border-t border-[#00ff9d]/5">
                         <span className="text-[10px] font-mono text-[#00ff9d]">{module.points} XP</span>
                         <div className="flex items-center gap-1 text-[8px] text-[#8b0000] font-bold uppercase tracking-widest group-hover:translate-x-1 transition-transform">

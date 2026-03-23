@@ -18,13 +18,42 @@ const Admin: React.FC<AdminProps> = ({ user }) => {
   const [newCode, setNewCode] = useState('');
   const [selectedVendor, setSelectedVendor] = useState('');
   const [isAdding, setIsAdding] = useState(false);
-  const [activeTab, setActiveTab] = useState<'codes' | 'vendors' | 'chats' | 'modules'>('codes');
+  const [activeTab, setActiveTab] = useState<'codes' | 'vendors' | 'chats' | 'modules' | 'users' | 'orders' | 'products' | 'services' | 'settings'>('codes');
   const [allChats, setAllChats] = useState<any[]>([]);
   const [modules, setModules] = useState<any[]>([]);
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [marketItems, setMarketItems] = useState<any[]>([]);
+  const [services, setServices] = useState<any[]>([]);
+  const [siteSettings, setSiteSettings] = useState<any>({});
   const [newVendor, setNewVendor] = useState({ name: '', category: '', description: '' });
+  const [newItem, setNewItem] = useState({ title: '', price: 0, description: '', category: '', vendorId: '', imageUrl: '' });
+  const [newService, setNewService] = useState({ title: '', price: '', description: '', icon: 'Terminal', status: 'ONLINE', warning: '' });
+
+  const [newModule, setNewModule] = useState({ title: '', description: '', category: 'phishing', difficulty: 'beginner', points: 100, icon: 'Shield', scenario: '', educationalOutcome: '', redFlags: '', bestPractices: '' });
 
   useEffect(() => {
     if (user.role !== 'admin') return;
+
+    const unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+      setUsers(snapshot.docs.map(doc => ({ ...doc.data() } as UserProfile)));
+    });
+
+    const unsubscribeOrders = onSnapshot(collection(db, 'orders'), (snapshot) => {
+      setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    const unsubscribeMarket = onSnapshot(collection(db, 'marketItems'), (snapshot) => {
+      setMarketItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    const unsubscribeServices = onSnapshot(collection(db, 'services'), (snapshot) => {
+      setServices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    const unsubscribeSettings = onSnapshot(doc(db, 'settings', 'site'), (snapshot) => {
+      if (snapshot.exists()) setSiteSettings(snapshot.data());
+    });
 
     const unsubscribeChats = onSnapshot(collection(db, 'chats'), (snapshot) => {
       setAllChats(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -69,11 +98,92 @@ const Admin: React.FC<AdminProps> = ({ user }) => {
 
     fetchVendors();
     return () => {
+      unsubscribeUsers();
+      unsubscribeOrders();
+      unsubscribeMarket();
+      unsubscribeServices();
+      unsubscribeSettings();
       unsubscribeChats();
       unsubscribeCodes();
       unsubscribeModules();
     };
   }, [user]);
+
+  const handleAddItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newItem.title || !newItem.vendorId) return;
+    try {
+      await addDoc(collection(db, 'marketItems'), newItem);
+      setNewItem({ title: '', price: 0, description: '', category: '', vendorId: '', imageUrl: '' });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'marketItems');
+    }
+  };
+
+  const handleAddService = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newService.title) return;
+    try {
+      await addDoc(collection(db, 'services'), newService);
+      setNewService({ title: '', price: '', description: '', icon: 'Terminal', status: 'ONLINE', warning: '' });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'services');
+    }
+  };
+
+  const updateSiteSettings = async (key: string, value: any) => {
+    try {
+      await setDoc(doc(db, 'settings', 'site'), { [key]: value }, { merge: true });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'settings/site');
+    }
+  };
+
+  const deleteUser = async (userId: string) => {
+    if (!window.confirm('Delete this user?')) return;
+    try {
+      await deleteDoc(doc(db, 'users', userId));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `users/${userId}`);
+    }
+  };
+
+  const toggleUserStatus = async (userId: string, currentStatus: string) => {
+    const newStatus = currentStatus === 'active' ? 'banned' : 'active';
+    if (!window.confirm(`Are you sure you want to ${newStatus === 'banned' ? 'BAN' : 'UNBAN'} this user?`)) return;
+    try {
+      await updateDoc(doc(db, 'users', userId), { status: newStatus });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${userId}`);
+    }
+  };
+
+  const deleteOrder = async (orderId: string) => {
+    if (!window.confirm('Delete this order?')) return;
+    try {
+      await deleteDoc(doc(db, 'orders', orderId));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `orders/${orderId}`);
+    }
+  };
+
+  const deleteItem = async (itemId: string) => {
+    if (!window.confirm('Delete this item?')) return;
+    try {
+      await deleteDoc(doc(db, 'marketItems', itemId));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `marketItems/${itemId}`);
+    }
+  };
+
+  const deleteService = async (serviceId: string) => {
+    if (!window.confirm('Delete this service?')) return;
+    try {
+      await deleteDoc(doc(db, 'services', serviceId));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `services/${serviceId}`);
+    }
+  };
 
   const handleAddVendor = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -207,6 +317,23 @@ const Admin: React.FC<AdminProps> = ({ user }) => {
     }
   };
 
+  const handleAddModule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newModule.title) return;
+    try {
+      const moduleData = {
+        ...newModule,
+        redFlags: newModule.redFlags.split('\n').filter(f => f.trim()),
+        bestPractices: newModule.bestPractices.split('\n').filter(b => b.trim()),
+        isActive: true
+      };
+      await addDoc(collection(db, 'modules'), moduleData);
+      setNewModule({ title: '', description: '', category: 'phishing', difficulty: 'beginner', points: 100, icon: 'Shield', scenario: '', educationalOutcome: '', redFlags: '', bestPractices: '' });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'modules');
+    }
+  };
+
   const deleteModule = async (moduleId: string) => {
     if (!window.confirm('Delete this module?')) return;
     try {
@@ -233,17 +360,39 @@ const Admin: React.FC<AdminProps> = ({ user }) => {
     <div className="space-y-12 animate-in slide-in-from-top duration-700">
       <header className="flex flex-col md:flex-row justify-between items-end gap-4">
         <div className="space-y-2">
-          <GlitchText text="ADMIN TERMINAL" className="text-3xl font-black text-[#8b0000]" />
-          <p className="text-[#00ff9d]/50 text-xs uppercase tracking-widest">System Control & Access Management</p>
+          <div className="flex items-center gap-3 text-[#8b0000]">
+            <Shield className="w-8 h-8" />
+            <GlitchText text="ROOT CONTROL CENTER" className="text-3xl font-black" />
+          </div>
+          <p className="text-[#00ff9d]/50 text-xs uppercase tracking-widest">ShadowNet Kernel v4.2.0-STABLE | Authorized Access Only</p>
+        </div>
+        <div className="flex gap-4">
+          <div className="bg-[#8b0000]/5 border border-[#8b0000]/20 p-3 rounded-sm">
+            <p className="text-[8px] text-[#8b0000] uppercase font-bold">Total Operatives</p>
+            <p className="text-xl font-black text-white">{users.length}</p>
+          </div>
+          <div className="bg-[#00ff9d]/5 border border-[#00ff9d]/20 p-3 rounded-sm">
+            <p className="text-[8px] text-[#00ff9d] uppercase font-bold">Active Circuits</p>
+            <p className="text-xl font-black text-white">{codes.filter(c => c.isActive).length}</p>
+          </div>
+          <div className="bg-[#8b0000]/5 border border-[#8b0000]/20 p-3 rounded-sm">
+            <p className="text-[8px] text-[#8b0000] uppercase font-bold">Total Revenue</p>
+            <p className="text-xl font-black text-white">{orders.reduce((acc, o) => acc + (o.price || 0), 0).toFixed(4)} BTC</p>
+          </div>
         </div>
       </header>
 
-      <div className="flex gap-4 border-b border-[#00ff9d]/10 mb-8">
+      <div className="flex gap-4 border-b border-[#00ff9d]/10 mb-8 overflow-x-auto no-scrollbar">
         {[
           { id: 'codes', label: 'Access Codes', icon: Key },
           { id: 'vendors', label: 'Vendors', icon: Users },
-          { id: 'chats', label: 'Active Chats', icon: MessageSquare },
+          { id: 'products', label: 'Products', icon: Plus },
+          { id: 'services', label: 'Services', icon: Terminal },
           { id: 'modules', label: 'Modules', icon: BookOpen },
+          { id: 'users', label: 'Users', icon: Users },
+          { id: 'orders', label: 'Orders', icon: Shield },
+          { id: 'chats', label: 'Chats', icon: MessageSquare },
+          { id: 'settings', label: 'Settings', icon: Settings },
         ].map(tab => (
           <button
             key={tab.id}
@@ -419,51 +568,325 @@ const Admin: React.FC<AdminProps> = ({ user }) => {
           </>
         )}
 
-        {activeTab === 'chats' && (
+        {activeTab === 'users' && (
           <section className="lg:col-span-3 border border-[#00ff9d]/10 bg-[#0d0d0d] p-8 rounded-sm space-y-8">
-            <h3 className="text-lg font-bold text-[#00ff9d] uppercase tracking-widest">All Active Chats</h3>
+            <h3 className="text-lg font-bold text-[#00ff9d] uppercase tracking-widest">User Directory</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-[#00ff9d]/10">
+                    <th className="pb-4 text-[10px] text-[#00ff9d]/50 uppercase tracking-widest font-bold">User</th>
+                    <th className="pb-4 text-[10px] text-[#00ff9d]/50 uppercase tracking-widest font-bold">Role</th>
+                    <th className="pb-4 text-[10px] text-[#00ff9d]/50 uppercase tracking-widest font-bold">Status</th>
+                    <th className="pb-4 text-[10px] text-[#00ff9d]/50 uppercase tracking-widest font-bold">Balance</th>
+                    <th className="pb-4 text-[10px] text-[#00ff9d]/50 uppercase tracking-widest font-bold text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#00ff9d]/5">
+                  {users.map((u) => (
+                    <tr key={u.uid} className="hover:bg-[#00ff9d]/5 transition-colors">
+                      <td className="py-4">
+                        <div className="flex flex-col">
+                          <span className="text-xs font-bold text-[#00ff9d]">{u.displayName}</span>
+                          <span className="text-[10px] text-[#00ff9d]/30">{u.email}</span>
+                        </div>
+                      </td>
+                      <td className="py-4 text-xs text-[#00ff9d]/70 uppercase">{u.role}</td>
+                      <td className="py-4">
+                        <button 
+                          onClick={() => toggleUserStatus(u.uid, u.status || 'active')}
+                          className={`px-2 py-1 text-[8px] font-bold uppercase border rounded-full transition-all ${
+                            (u.status || 'active') === 'active' 
+                              ? 'text-[#00ff9d] border-[#00ff9d]/30 bg-[#00ff9d]/5 hover:bg-[#8b0000]/20 hover:border-[#8b0000]/30 hover:text-[#8b0000]' 
+                              : 'text-[#8b0000] border-[#8b0000]/30 bg-[#8b0000]/5 hover:bg-[#00ff9d]/20 hover:border-[#00ff9d]/30 hover:text-[#00ff9d]'
+                          }`}
+                        >
+                          {u.status || 'active'}
+                        </button>
+                      </td>
+                      <td className="py-4 text-xs text-[#00ff9d] font-mono">{u.balance} BTC</td>
+                      <td className="py-4 text-right space-x-2">
+                        <button onClick={() => deleteUser(u.uid)} className="text-[#8b0000]/50 hover:text-[#8b0000] transition-colors" title="Delete User">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'orders' && (
+          <section className="lg:col-span-3 border border-[#00ff9d]/10 bg-[#0d0d0d] p-8 rounded-sm space-y-8">
+            <h3 className="text-lg font-bold text-[#00ff9d] uppercase tracking-widest">Order History</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {allChats.map(chat => (
-                <div key={chat.id} className="p-4 border border-[#00ff9d]/10 bg-[#0a0a0a] space-y-2">
+              {orders.map(order => (
+                <div key={order.id} className="p-4 border border-[#00ff9d]/10 bg-[#0a0a0a] space-y-2">
                   <div className="flex justify-between text-[10px] text-[#00ff9d]/50 uppercase">
-                    <span>ID: {chat.id.slice(0, 8)}</span>
-                    <span>{chat.updatedAt ? format(new Date(chat.updatedAt), 'MMM dd HH:mm') : 'N/A'}</span>
+                    <span>Order: {order.id.slice(0, 8)}</span>
+                    <span>{order.timestamp ? format(new Date(order.timestamp), 'MMM dd HH:mm') : 'N/A'}</span>
                   </div>
-                  <p className="text-xs text-[#00ff9d] font-bold">Participants: {chat.participants.length}</p>
-                  <p className="text-[10px] text-[#00ff9d]/70 italic truncate">"{chat.lastMessage}"</p>
+                  <p className="text-xs text-[#00ff9d] font-bold">{order.productName || 'Unknown Product'}</p>
+                  <p className="text-[10px] text-[#00ff9d]/70">Buyer: {users.find(u => u.uid === order.userId)?.displayName || order.userId}</p>
+                  <p className="text-xs text-[#8b0000] font-mono">{order.price} BTC</p>
+                  <button onClick={() => deleteOrder(order.id)} className="text-[8px] text-[#8b0000] uppercase font-bold hover:underline">Cancel Order</button>
                 </div>
               ))}
             </div>
           </section>
         )}
 
-        {activeTab === 'modules' && (
+        {activeTab === 'products' && (
+          <>
+            <section className="lg:col-span-1 border border-[#00ff9d]/10 bg-[#0d0d0d] p-8 rounded-sm space-y-8">
+              <h3 className="text-lg font-bold text-[#00ff9d] uppercase tracking-widest">New Market Item</h3>
+              <form onSubmit={handleAddItem} className="space-y-4">
+                <input 
+                  type="text" 
+                  placeholder="Item Title" 
+                  value={newItem.title}
+                  onChange={(e) => setNewItem({...newItem, title: e.target.value})}
+                  className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs focus:outline-none focus:border-[#00ff9d]"
+                />
+                <input 
+                  type="number" 
+                  placeholder="Price (BTC)" 
+                  value={newItem.price}
+                  onChange={(e) => setNewItem({...newItem, price: parseFloat(e.target.value)})}
+                  className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs focus:outline-none focus:border-[#00ff9d]"
+                />
+                <input 
+                  type="text" 
+                  placeholder="Category" 
+                  value={newItem.category}
+                  onChange={(e) => setNewItem({...newItem, category: e.target.value})}
+                  className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs focus:outline-none focus:border-[#00ff9d]"
+                />
+                <select 
+                  value={newItem.vendorId}
+                  onChange={(e) => setNewItem({...newItem, vendorId: e.target.value})}
+                  className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs focus:outline-none focus:border-[#00ff9d]"
+                >
+                  <option value="">Select Vendor</option>
+                  {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                </select>
+                <input 
+                  type="text" 
+                  placeholder="Image URL" 
+                  value={newItem.imageUrl}
+                  onChange={(e) => setNewItem({...newItem, imageUrl: e.target.value})}
+                  className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs focus:outline-none focus:border-[#00ff9d]"
+                />
+                <textarea 
+                  placeholder="Description" 
+                  value={newItem.description}
+                  onChange={(e) => setNewItem({...newItem, description: e.target.value})}
+                  className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs h-24 focus:outline-none focus:border-[#00ff9d]"
+                />
+                <button type="submit" className="w-full py-4 bg-[#8b0000] text-white font-bold uppercase tracking-widest hover:bg-[#a00000]">Add Item</button>
+              </form>
+            </section>
+            <section className="lg:col-span-2 border border-[#00ff9d]/10 bg-[#0d0d0d] p-8 rounded-sm space-y-8">
+              <h3 className="text-lg font-bold text-[#00ff9d] uppercase tracking-widest">Market Inventory</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {marketItems.map(p => (
+                  <div key={p.id} className="p-4 border border-[#00ff9d]/10 bg-[#0a0a0a] flex gap-4">
+                    {p.imageUrl && <img src={p.imageUrl} alt={p.title} className="w-12 h-12 object-cover border border-[#00ff9d]/20" referrerPolicy="no-referrer" />}
+                    <div className="flex-1">
+                      <p className="text-xs font-bold text-[#00ff9d]">{p.title}</p>
+                      <p className="text-[10px] text-[#00ff9d]/50 uppercase">{vendors.find(v => v.id === p.vendorId)?.name || p.vendorId}</p>
+                      <p className="text-xs text-[#8b0000] font-mono">{p.price} BTC</p>
+                    </div>
+                    <button onClick={() => deleteItem(p.id)} className="text-[#8b0000]/50 hover:text-[#8b0000]"><Trash2 className="w-4 h-4" /></button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </>
+        )}
+
+        {activeTab === 'services' && (
+          <>
+            <section className="lg:col-span-1 border border-[#00ff9d]/10 bg-[#0d0d0d] p-8 rounded-sm space-y-8">
+              <h3 className="text-lg font-bold text-[#00ff9d] uppercase tracking-widest">New Service</h3>
+              <form onSubmit={handleAddService} className="space-y-4">
+                <input 
+                  type="text" 
+                  placeholder="Service Title" 
+                  value={newService.title}
+                  onChange={(e) => setNewService({...newService, title: e.target.value})}
+                  className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs focus:outline-none focus:border-[#00ff9d]"
+                />
+                <input 
+                  type="text" 
+                  placeholder="Price (e.g. 0.05 BTC / Hour)" 
+                  value={newService.price}
+                  onChange={(e) => setNewService({...newService, price: e.target.value})}
+                  className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs focus:outline-none focus:border-[#00ff9d]"
+                />
+                <input 
+                  type="text" 
+                  placeholder="Warning Text" 
+                  value={newService.warning}
+                  onChange={(e) => setNewService({...newService, warning: e.target.value})}
+                  className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs focus:outline-none focus:border-[#00ff9d]"
+                />
+                <textarea 
+                  placeholder="Description" 
+                  value={newService.description}
+                  onChange={(e) => setNewService({...newService, description: e.target.value})}
+                  className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs h-24 focus:outline-none focus:border-[#00ff9d]"
+                />
+                <button type="submit" className="w-full py-4 bg-[#8b0000] text-white font-bold uppercase tracking-widest hover:bg-[#a00000]">Add Service</button>
+              </form>
+            </section>
+            <section className="lg:col-span-2 border border-[#00ff9d]/10 bg-[#0d0d0d] p-8 rounded-sm space-y-8">
+              <h3 className="text-lg font-bold text-[#00ff9d] uppercase tracking-widest">Service Catalog</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {services.map(s => (
+                  <div key={s.id} className="p-4 border border-[#00ff9d]/10 bg-[#0a0a0a] flex justify-between items-center">
+                    <div>
+                      <p className="text-xs font-bold text-[#00ff9d]">{s.title}</p>
+                      <p className="text-xs text-[#8b0000] font-mono">{s.price}</p>
+                    </div>
+                    <button onClick={() => deleteService(s.id)} className="text-[#8b0000]/50 hover:text-[#8b0000]"><Trash2 className="w-4 h-4" /></button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </>
+        )}
+
+        {activeTab === 'settings' && (
           <section className="lg:col-span-3 border border-[#00ff9d]/10 bg-[#0d0d0d] p-8 rounded-sm space-y-8">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-bold text-[#00ff9d] uppercase tracking-widest">Training Modules</h3>
-              <button 
-                onClick={seedModules}
-                className="px-4 py-2 bg-[#8b0000] text-white text-[10px] font-bold uppercase tracking-widest hover:bg-[#a00000]"
-              >
-                Seed Default Modules
-              </button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {modules.map(module => (
-                <div key={module.id} className="p-4 border border-[#00ff9d]/10 bg-[#0a0a0a] space-y-4">
-                  <div className="flex justify-between items-start">
-                    <h4 className="text-xs font-bold text-[#00ff9d] uppercase">{module.title}</h4>
-                    <button onClick={() => deleteModule(module.id)} className="text-[#8b0000]/50 hover:text-[#8b0000]"><Trash2 className="w-4 h-4" /></button>
-                  </div>
-                  <p className="text-[10px] text-[#00ff9d]/50 line-clamp-2">{module.description}</p>
-                  <div className="flex justify-between text-[8px] uppercase tracking-widest text-[#00ff9d]/30">
-                    <span>{module.category}</span>
-                    <span>{module.points} XP</span>
-                  </div>
+            <h3 className="text-lg font-bold text-[#00ff9d] uppercase tracking-widest">Website Configuration</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="space-y-4">
+                <div className="flex justify-between items-center p-4 border border-[#00ff9d]/10 bg-[#0a0a0a]">
+                  <span className="text-xs text-[#00ff9d]">Maintenance Mode</span>
+                  <button 
+                    onClick={() => updateSiteSettings('maintenance', !siteSettings.maintenance)}
+                    className={`px-4 py-1 text-[8px] font-bold uppercase border ${siteSettings.maintenance ? 'bg-[#8b0000] text-white' : 'text-[#00ff9d] border-[#00ff9d]/30'}`}
+                  >
+                    {siteSettings.maintenance ? 'Enabled' : 'Disabled'}
+                  </button>
                 </div>
-              ))}
+                <div className="flex justify-between items-center p-4 border border-[#00ff9d]/10 bg-[#0a0a0a]">
+                  <span className="text-xs text-[#00ff9d]">New Registrations</span>
+                  <button 
+                    onClick={() => updateSiteSettings('registrations', !siteSettings.registrations)}
+                    className={`px-4 py-1 text-[8px] font-bold uppercase border ${!siteSettings.registrations ? 'bg-[#8b0000] text-white' : 'text-[#00ff9d] border-[#00ff9d]/30'}`}
+                  >
+                    {siteSettings.registrations ? 'Open' : 'Closed'}
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] text-[#00ff9d]/50 uppercase tracking-widest">System Message</label>
+                  <textarea 
+                    value={siteSettings.systemMessage || ''}
+                    onChange={(e) => updateSiteSettings('systemMessage', e.target.value)}
+                    className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs h-24 focus:outline-none focus:border-[#00ff9d]"
+                    placeholder="Global alert message..."
+                  />
+                </div>
+              </div>
             </div>
           </section>
+        )}
+
+        {activeTab === 'modules' && (
+          <>
+            <section className="lg:col-span-1 border border-[#00ff9d]/10 bg-[#0d0d0d] p-8 rounded-sm space-y-8">
+              <h3 className="text-lg font-bold text-[#00ff9d] uppercase tracking-widest">New Training</h3>
+              <form onSubmit={handleAddModule} className="space-y-4">
+                <input 
+                  type="text" 
+                  placeholder="Module Title" 
+                  value={newModule.title}
+                  onChange={(e) => setNewModule({...newModule, title: e.target.value})}
+                  className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs focus:outline-none focus:border-[#00ff9d]"
+                />
+                <select 
+                  value={newModule.category}
+                  onChange={(e) => setNewModule({...newModule, category: e.target.value as any})}
+                  className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs focus:outline-none focus:border-[#00ff9d]"
+                >
+                  <option value="phishing">Phishing</option>
+                  <option value="ransomware">Ransomware</option>
+                  <option value="scams">Scams</option>
+                  <option value="social-engineering">Social Engineering</option>
+                  <option value="network">Network</option>
+                  <option value="passwords">Passwords</option>
+                  <option value="malware">Malware</option>
+                </select>
+                <select 
+                  value={newModule.difficulty}
+                  onChange={(e) => setNewModule({...newModule, difficulty: e.target.value as any})}
+                  className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs focus:outline-none focus:border-[#00ff9d]"
+                >
+                  <option value="beginner">Beginner</option>
+                  <option value="intermediate">Intermediate</option>
+                  <option value="advanced">Advanced</option>
+                </select>
+                <input 
+                  type="number" 
+                  placeholder="Points" 
+                  value={newModule.points}
+                  onChange={(e) => setNewModule({...newModule, points: parseInt(e.target.value)})}
+                  className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs focus:outline-none focus:border-[#00ff9d]"
+                />
+                <textarea 
+                  placeholder="Description" 
+                  value={newModule.description}
+                  onChange={(e) => setNewModule({...newModule, description: e.target.value})}
+                  className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs h-20 focus:outline-none focus:border-[#00ff9d]"
+                />
+                <textarea 
+                  placeholder="Scenario" 
+                  value={newModule.scenario}
+                  onChange={(e) => setNewModule({...newModule, scenario: e.target.value})}
+                  className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs h-20 focus:outline-none focus:border-[#00ff9d]"
+                />
+                <textarea 
+                  placeholder="Red Flags (one per line)" 
+                  value={newModule.redFlags}
+                  onChange={(e) => setNewModule({...newModule, redFlags: e.target.value})}
+                  className="w-full bg-[#0a0a0a] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs h-20 focus:outline-none focus:border-[#00ff9d]"
+                />
+                <button type="submit" className="w-full py-4 bg-[#8b0000] text-white font-bold uppercase tracking-widest hover:bg-[#a00000]">Add Module</button>
+              </form>
+            </section>
+            <section className="lg:col-span-2 border border-[#00ff9d]/10 bg-[#0d0d0d] p-8 rounded-sm space-y-8">
+              <div className="flex justify-between items-center">
+                <h3 className="text-lg font-bold text-[#00ff9d] uppercase tracking-widest">Training Modules</h3>
+                <button 
+                  onClick={seedModules}
+                  className="px-4 py-2 bg-[#8b0000] text-white text-[10px] font-bold uppercase tracking-widest hover:bg-[#a00000]"
+                >
+                  Seed Defaults
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {modules.map(module => (
+                  <div key={module.id} className="p-4 border border-[#00ff9d]/10 bg-[#0a0a0a] space-y-4">
+                    <div className="flex justify-between items-start">
+                      <h4 className="text-xs font-bold text-[#00ff9d] uppercase">{module.title}</h4>
+                      <button onClick={() => deleteModule(module.id)} className="text-[#8b0000]/50 hover:text-[#8b0000]"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                    <p className="text-[10px] text-[#00ff9d]/50 line-clamp-2">{module.description}</p>
+                    <div className="flex justify-between text-[8px] uppercase tracking-widest text-[#00ff9d]/30">
+                      <span>{module.category}</span>
+                      <span>{module.points} XP</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </>
         )}
       </div>
     </div>

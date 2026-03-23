@@ -1,10 +1,12 @@
 export type UserRole = 'admin' | 'user';
+export type UserStatus = 'active' | 'banned';
 
 export interface UserProfile {
   uid: string;
   email: string;
   displayName: string;
   role: UserRole;
+  status: UserStatus;
   balance: number;
   debt: number;
   points: number;
@@ -101,6 +103,7 @@ export interface MarketItem {
   category: string;
   vendorId: string;
   description: string;
+  imageUrl?: string;
 }
 
 export enum OperationType {

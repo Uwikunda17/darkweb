@@ -9,6 +9,7 @@
         "email": { "type": "string" },
         "displayName": { "type": "string" },
         "role": { "type": "string", "enum": ["admin", "user"] },
+        "status": { "type": "string", "enum": ["active", "banned"] },
         "balance": { "type": "number" },
         "debt": { "type": "number" },
         "points": { "type": "number" },
@@ -123,7 +124,9 @@
         "price": { "type": "number" },
         "category": { "type": "string" },
         "vendorId": { "type": "string" },
-        "description": { "type": "string" }
+        "description": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
       },
       "required": ["title", "price", "vendorId"]
     }

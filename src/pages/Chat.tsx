@@ -13,7 +13,7 @@ interface ChatProps {
 }
 
 const Chat: React.FC<ChatProps> = ({ user }) => {
-  const [chats, setChats] = useState<ChatType[]>([]);
+  const [chats, setChats] = useState<(ChatType & { unreadCount?: number })[]>([]);
   const [activeChat, setActiveChat] = useState<ChatType | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -155,6 +155,43 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
     }
   }, [messages.length, activeChat, user.uid, userKeys]);
 
+  const [participantProfiles, setParticipantProfiles] = useState<Record<string, UserProfile>>({});
+
+  // Fetch profiles for all participants in all chats to show online status
+  const participantIdsStr = chats
+    .map(chat => chat.participants.find(p => p !== user.uid))
+    .filter(Boolean)
+    .sort()
+    .join(',');
+
+  useEffect(() => {
+    if (!participantIdsStr) return;
+    
+    const participantIds = new Set(participantIdsStr.split(',').filter(Boolean));
+    const unsubscribers: (() => void)[] = [];
+
+    participantIds.forEach((pid: string) => {
+      const unsub = onSnapshot(doc(db, 'users', pid), (docSnap) => {
+        if (docSnap.exists()) {
+          setParticipantProfiles(prev => ({
+            ...prev,
+            [pid]: docSnap.data() as UserProfile
+          }));
+        }
+      });
+      unsubscribers.push(unsub);
+    });
+
+    return () => unsubscribers.forEach(unsub => unsub());
+  }, [participantIdsStr, user.uid]);
+
+  const isOnline = (lastActive?: string) => {
+    if (!lastActive) return false;
+    const lastActiveDate = new Date(lastActive);
+    const now = new Date();
+    return (now.getTime() - lastActiveDate.getTime()) < 300000; // 5 minutes
+  };
+
   useEffect(() => {
     if (!user) return;
 
@@ -167,6 +204,21 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetchedChats = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChatType));
       setChats(fetchedChats);
+      
+      // For each chat, listen to unread messages
+      fetchedChats.forEach(chat => {
+        const unreadQ = query(
+          collection(db, `chats/${chat.id}/messages`),
+          where('read', '==', false),
+          where('senderId', '!=', user.uid)
+        );
+        onSnapshot(unreadQ, (unreadSnap) => {
+          setChats(prev => prev.map(c => 
+            c.id === chat.id ? { ...c, unreadCount: unreadSnap.size } : c
+          ));
+        });
+      });
+
       if (fetchedChats.length > 0) {
         setShowCodeEntry(false);
       }
@@ -489,19 +541,48 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
             <button
               key={chat.id}
               onClick={() => setActiveChat(chat)}
-              className={`w-full p-4 text-left border-b border-[#00ff9d]/5 transition-all ${
+              className={`w-full p-4 text-left border-b border-[#00ff9d]/5 transition-all relative ${
                 activeChat?.id === chat.id ? 'bg-[#8b0000]/10 border-l-2 border-l-[#8b0000]' : 'hover:bg-[#00ff9d]/5'
               }`}
             >
               <div className="flex justify-between items-start mb-1">
-                <span className="text-[10px] font-bold text-[#00ff9d]">
-                  {chat.participants.find(p => p !== user.uid)?.slice(0, 8)}...
-                </span>
+                <div className="flex items-center gap-2">
+                  <div className="flex flex-col">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${
+                        isOnline(participantProfiles[chat.participants.find(p => p !== user.uid) || '']?.lastActive) 
+                          ? 'bg-[#00ff9d] shadow-[0_0_5px_#00ff9d]' 
+                          : 'bg-slate-600'
+                      }`} />
+                      <span className={`text-[10px] font-bold ${chat.unreadCount ? 'text-white' : 'text-[#00ff9d]'}`}>
+                        {participantProfiles[chat.participants.find(p => p !== user.uid) || '']?.codename || 
+                         participantProfiles[chat.participants.find(p => p !== user.uid) || '']?.displayName || 
+                         chat.participants.find(p => p !== user.uid)?.slice(0, 8)}
+                      </span>
+                    </div>
+                    <span className={`text-[7px] uppercase tracking-widest ml-4 ${
+                      isOnline(participantProfiles[chat.participants.find(p => p !== user.uid) || '']?.lastActive) 
+                        ? 'text-[#00ff9d]/70' 
+                        : 'text-slate-500'
+                    }`}>
+                      {isOnline(participantProfiles[chat.participants.find(p => p !== user.uid) || '']?.lastActive) ? 'Online' : 'Offline'}
+                    </span>
+                  </div>
+                </div>
                 <span className="text-[8px] text-[#00ff9d]/30">
                   {format(new Date(chat.updatedAt), 'HH:mm')}
                 </span>
               </div>
-              <p className="text-[10px] text-[#00ff9d]/50 truncate">{chat.lastMessage}</p>
+              <div className="flex justify-between items-center">
+                <p className={`text-[10px] truncate flex-1 ${chat.unreadCount ? 'text-[#00ff9d] font-bold' : 'text-[#00ff9d]/50'}`}>
+                  {chat.lastMessage}
+                </p>
+                {chat.unreadCount ? (
+                  <span className="ml-2 w-4 h-4 bg-[#8b0000] rounded-full flex items-center justify-center text-[8px] text-white font-bold animate-pulse">
+                    {chat.unreadCount}
+                  </span>
+                ) : null}
+              </div>
             </button>
           ))}
         </div>
@@ -519,7 +600,9 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
                 </div>
                 <div>
                   <h4 className="text-xs font-bold text-[#00ff9d]">
-                    VENDOR_ID: {activeChat.participants.find(p => p !== user.uid)}
+                    VENDOR_ID: {participantProfiles[activeChat.participants.find(p => p !== user.uid) || '']?.codename || 
+                                participantProfiles[activeChat.participants.find(p => p !== user.uid) || '']?.displayName || 
+                                activeChat.participants.find(p => p !== user.uid)}
                   </h4>
                   <div className="flex items-center gap-1 text-[8px] text-[#00ff9d]/40 uppercase">
                     <Lock className="w-2 h-2" />
@@ -556,7 +639,10 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
                         }`}>
                           <div className="flex items-center gap-2">
                             {msg.encrypted && (
-                              <Lock className="w-3 h-3 text-[#00ff9d]/30 shrink-0" />
+                              <div className="flex items-center gap-1 px-1.5 py-0.5 bg-[#00ff9d]/20 rounded-full border border-[#00ff9d]/30 mr-1">
+                                <Lock className="w-2.5 h-2.5 text-[#00ff9d]" />
+                                <span className="text-[7px] font-bold text-[#00ff9d] uppercase">E2EE</span>
+                              </div>
                             )}
                             <span>{msg.encrypted ? (decryptedMessages[msg.id] || '[ENCRYPTED_DATA_STREAM]') : msg.text}</span>
                           </div>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { auth, db } from './firebase';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, query, collection, where, collectionGroup, updateDoc } from 'firebase/firestore';
 import { UserProfile, UserRole } from './types';
 import { TorLoading } from './components/TorLoading';
 import { GlitchText } from './components/TorLoading';
@@ -22,9 +22,12 @@ import ModulePlayer from './pages/ModulePlayer';
 import Quiz from './pages/Quiz';
 import Account from './pages/Account';
 
-import { AnimatePresence } from 'motion/react';
+import { format } from 'date-fns';
+import { AnimatePresence, motion } from 'motion/react';
 import { RansomwarePopup, PhishingAlert } from './components/Tricks';
 import OnlineUsersCounter from './components/OnlineUsersCounter';
+import AdminGateway from './components/AdminGateway';
+import * as openpgp from 'openpgp';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -36,7 +39,12 @@ export default function App() {
   const [showRansomware, setShowRansomware] = useState(false);
   const [showPhishing, setShowPhishing] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(false);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const [isAdminGatewayOpen, setIsAdminGatewayOpen] = useState(false);
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [unreadMessages, setUnreadMessages] = useState<any[]>([]);
+  const [userKeys, setUserKeys] = useState<{ publicKey: string; privateKey: string } | null>(null);
   const [unlockedFeatures, setUnlockedFeatures] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('unlocked_features');
@@ -48,12 +56,29 @@ export default function App() {
   useEffect(() => {
     setOnionAddress(generateOnionAddress());
     
-    // Keyboard shortcut for terminal: Alt + T
+    // Keyboard shortcuts
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Terminal: Alt + T
       if (e.altKey && e.key === 't') {
         setIsTerminalOpen(prev => !prev);
       }
     };
+
+    // Better multi-key detection for Alt + H + S
+    const pressedKeys = new Set<string>();
+    const handleKeyCombo = (e: KeyboardEvent) => {
+      pressedKeys.add(e.key.toLowerCase());
+      if (e.altKey && pressedKeys.has('h') && pressedKeys.has('s')) {
+        setIsAdminGatewayOpen(prev => !prev);
+        pressedKeys.clear();
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      pressedKeys.delete(e.key.toLowerCase());
+    };
+
+    window.addEventListener('keydown', handleKeyCombo);
+    window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('keydown', handleKeyDown);
 
     // Randomly trigger "tricks"
@@ -69,15 +94,12 @@ export default function App() {
         const userRef = doc(db, 'users', firebaseUser.uid);
         
         // Use onSnapshot for real-time updates to balance, debt, etc.
-        const unsubscribeUser = onSnapshot(userRef, (docSnap) => {
+        const unsubscribeUser = onSnapshot(userRef, async (docSnap) => {
           if (docSnap.exists()) {
-            setUser(docSnap.data() as UserProfile);
-          } else {
-            // Create new user if doesn't exist
-            const newUser: UserProfile = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email || '',
-              displayName: firebaseUser.displayName || 'Anonymous',
+            const data = docSnap.data() as UserProfile;
+            // Patch missing fields for existing users
+            const requiredFields: Partial<UserProfile> = {
+              status: 'active',
               role: 'user',
               balance: 0,
               debt: 0,
@@ -87,16 +109,64 @@ export default function App() {
               streak: 0,
               lastActive: new Date().toISOString()
             };
-            setDoc(userRef, newUser);
+            
+            let needsUpdate = false;
+            const updateData: any = {};
+            
+            (Object.keys(requiredFields) as (keyof UserProfile)[]).forEach(key => {
+              const val = data[key];
+              const isMissing = val === undefined || val === null;
+              const isNumeric = typeof requiredFields[key] === 'number';
+              const isInvalidNumber = isNumeric && (typeof val !== 'number' || isNaN(val));
+
+              if (isMissing || isInvalidNumber) {
+                updateData[key] = requiredFields[key];
+                needsUpdate = true;
+              }
+            });
+
+            if (needsUpdate) {
+              try {
+                await updateDoc(userRef, updateData);
+              } catch (e) {
+                console.error('Failed to patch user profile:', e);
+              }
+            } else {
+              setUser(data);
+            }
+          } else {
+            // Create new user if doesn't exist
+            const newUser: UserProfile = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email || '',
+              displayName: firebaseUser.displayName || 'Anonymous',
+              role: 'user',
+              status: 'active',
+              balance: 0,
+              debt: 0,
+              points: 0,
+              completedModules: [],
+              achievements: [],
+              streak: 0,
+              lastActive: new Date().toISOString()
+            };
+            setDoc(userRef, newUser).catch(e => console.error('Failed to create user:', e));
             setUser(newUser);
           }
           setLoading(false);
         }, (err) => {
-          console.error('User profile listener error:', err);
+          console.error('User profile listener error details:', {
+            message: err.message,
+            code: (err as any).code,
+            name: err.name,
+            uid: firebaseUser.uid
+          });
           setLoading(false);
         });
 
-        return () => unsubscribeUser();
+        return () => {
+          unsubscribeUser();
+        };
       } else {
         setUser(null);
         setLoading(false);
@@ -108,6 +178,120 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, []);
+
+  useEffect(() => {
+    if (user?.uid) {
+      const storedKeys = localStorage.getItem(`pgp_keys_${user.uid}`);
+      if (storedKeys) {
+        setUserKeys(JSON.parse(storedKeys));
+      }
+    }
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    // Update lastActive every 2 minutes
+    const updateStatus = async () => {
+      try {
+        await updateDoc(doc(db, 'users', user.uid), {
+          lastActive: new Date().toISOString()
+        });
+      } catch (e) {
+        console.error('Failed to update status:', e);
+      }
+    };
+
+    updateStatus();
+    const statusInterval = setInterval(updateStatus, 120000);
+
+    return () => clearInterval(statusInterval);
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const chatsQuery = query(
+      collection(db, 'chats'),
+      where('participants', 'array-contains', user.uid)
+    );
+
+    const unsubscribers: (() => void)[] = [];
+
+    const unsubscribeChats = onSnapshot(chatsQuery, (snapshot) => {
+      // Clear existing message unsubscribers
+      unsubscribers.forEach(unsub => unsub());
+      unsubscribers.length = 0;
+
+      let totalUnread = 0;
+      const allUnread: any[] = [];
+
+      snapshot.docs.forEach(chatDoc => {
+        const chatId = chatDoc.id;
+        const messagesQuery = query(
+          collection(db, `chats/${chatId}/messages`),
+          where('read', '==', false),
+          where('senderId', '!=', user.uid)
+        );
+
+        const unsubMessages = onSnapshot(messagesQuery, async (msgSnapshot) => {
+          const newMessages = await Promise.all(msgSnapshot.docs.map(async (mDoc) => {
+            const mData = mDoc.data();
+            let senderName = mData.senderId.slice(0, 8);
+            
+            // Try to get sender name
+            try {
+              const sDoc = await getDoc(doc(db, 'users', mData.senderId));
+              if (sDoc.exists()) {
+                const sData = sDoc.data();
+                senderName = sData.codename || sData.displayName || senderName;
+              }
+            } catch (e) {}
+
+            let text = mData.text;
+            if (mData.encrypted && userKeys) {
+              try {
+                const privateKey = await openpgp.readPrivateKey({ armoredKey: userKeys.privateKey });
+                const messageObj = await openpgp.readMessage({ armoredMessage: mData.text });
+                const { data: decrypted } = await openpgp.decrypt({
+                  message: messageObj,
+                  decryptionKeys: privateKey,
+                });
+                text = decrypted as string;
+              } catch (e) {
+                text = '[ENCRYPTED]';
+              }
+            }
+
+            return {
+              id: mDoc.id,
+              ...mData,
+              senderName,
+              displayText: text
+            };
+          }));
+
+          setUnreadMessages(prev => {
+            const filtered = prev.filter(m => m.chatId !== chatId);
+            return [...filtered, ...newMessages].sort((a, b) => 
+              new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+            );
+          });
+        });
+
+        unsubscribers.push(unsubMessages);
+      });
+    });
+
+    return () => {
+      unsubscribeChats();
+      unsubscribers.forEach(unsub => unsub());
+    };
+  }, [user, userKeys]);
+
+  useEffect(() => {
+    setUnreadChatCount(unreadMessages.length);
+  }, [unreadMessages]);
 
   const handleLogin = async () => {
     try {
@@ -150,6 +334,28 @@ export default function App() {
   };
 
   const renderPage = () => {
+    if (user && user.status === 'banned') {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-4">
+          <AlertTriangle className="w-24 h-24 text-[#8b0000] mb-6 animate-bounce" />
+          <h2 className="text-4xl font-bold text-[#8b0000] mb-4 tracking-tighter">ACCESS DENIED: ACCOUNT TERMINATED</h2>
+          <p className="text-[#00ff9d]/70 max-w-md mb-8 font-mono uppercase text-sm">
+            Your identity has been flagged for violations of the ShadowNet protocol. 
+            Your access to all encrypted circuits has been permanently revoked.
+          </p>
+          <div className="p-4 border border-[#8b0000]/30 bg-[#8b0000]/5 rounded-sm">
+            <p className="text-[10px] text-[#8b0000] font-bold uppercase tracking-[0.2em]">Reason: Security Protocol Violation</p>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="mt-8 px-8 py-2 border border-[#00ff9d]/20 text-[#00ff9d]/50 hover:text-[#00ff9d] hover:border-[#00ff9d] transition-all text-xs uppercase tracking-widest"
+          >
+            Disconnect from Node
+          </button>
+        </div>
+      );
+    }
+
     if (!user && currentPage !== 'disclaimer') {
       return (
         <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-4">
@@ -210,6 +416,84 @@ export default function App() {
 
             <div className="flex items-center gap-4">
               <OnlineUsersCounter />
+              
+              {user && (
+                <div className="relative">
+                  <button 
+                    onClick={() => setIsNotificationOpen(!isNotificationOpen)}
+                    className="p-2 text-[#00ff9d]/30 hover:text-[#00ff9d] transition-colors relative"
+                    title="Notifications"
+                  >
+                    <MessageSquare className="w-5 h-5" />
+                    {unreadChatCount > 0 && (
+                      <span className="absolute top-1 right-1 flex h-3 w-3 items-center justify-center rounded-full bg-[#8b0000] text-[7px] text-white animate-pulse">
+                        {unreadChatCount}
+                      </span>
+                    )}
+                  </button>
+
+                  <AnimatePresence>
+                    {isNotificationOpen && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 10 }}
+                        className="absolute right-0 mt-2 w-64 bg-[#0d0d0d] border border-[#00ff9d]/20 rounded-sm shadow-2xl z-50 p-4 space-y-4"
+                      >
+                        <div className="flex justify-between items-center border-b border-[#00ff9d]/10 pb-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-[#00ff9d]">Incoming Transmissions</span>
+                          <span className="text-[8px] text-[#00ff9d]/30">{unreadChatCount} New</span>
+                        </div>
+                        <div className="max-h-48 overflow-y-auto no-scrollbar space-y-2">
+                          {unreadMessages.length > 0 ? unreadMessages.map(msg => (
+                            <button 
+                              key={msg.id}
+                              onClick={() => {
+                                setCurrentPage('chat');
+                                setIsNotificationOpen(false);
+                              }}
+                              className="w-full text-left p-2 hover:bg-[#00ff9d]/5 border border-transparent hover:border-[#00ff9d]/10 transition-all group relative overflow-hidden"
+                            >
+                              <div className="flex items-start gap-2">
+                                <div className="w-6 h-6 bg-[#8b0000]/20 rounded-full flex items-center justify-center border border-[#8b0000]/30 mt-0.5">
+                                  <Terminal className="w-3 h-3 text-[#8b0000]" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex justify-between items-center mb-0.5">
+                                    <span className="text-[9px] text-[#00ff9d] font-bold uppercase tracking-tighter truncate">
+                                      {msg.senderName}
+                                    </span>
+                                    <span className="text-[7px] text-[#00ff9d]/30 font-mono">
+                                      {format(new Date(msg.timestamp), 'HH:mm')}
+                                    </span>
+                                  </div>
+                                  <p className="text-[8px] text-[#00ff9d]/60 truncate leading-tight italic">
+                                    {msg.displayText.length > 40 ? msg.displayText.slice(0, 40) + '...' : msg.displayText}
+                                  </p>
+                                </div>
+                              </div>
+                              {/* Glitch line effect on hover */}
+                              <div className="absolute bottom-0 left-0 w-full h-[1px] bg-[#00ff9d]/0 group-hover:bg-[#00ff9d]/20 transition-all" />
+                            </button>
+                          )) : (
+                            <p className="text-[8px] text-[#00ff9d]/30 text-center py-4 uppercase tracking-widest">No new transmissions</p>
+                          )}
+                        </div>
+                        <button 
+                          onClick={() => {
+                            setCurrentPage('chat');
+                            setIsNotificationOpen(false);
+                          }}
+                          className="w-full py-2 bg-[#8b0000]/10 border border-[#8b0000]/30 text-[#8b0000] text-[8px] font-bold uppercase tracking-widest hover:bg-[#8b0000] hover:text-white transition-all"
+                        >
+                          Open Secure Terminal
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+
               <button 
                 onClick={() => setSoundEnabled(!soundEnabled)}
                 className="p-2 text-[#00ff9d]/30 hover:text-[#00ff9d] transition-colors"
@@ -255,16 +539,15 @@ export default function App() {
               { id: 'home', label: 'Hidden Wiki', icon: Info },
               { id: 'dashboard', label: 'Training', icon: BookOpen },
               { id: 'market', label: 'Black Market', icon: ShoppingCart },
-              { id: 'chat', label: 'Private Chat', icon: MessageSquare },
+              { id: 'chat', label: 'Private Chat', icon: MessageSquare, badge: unreadChatCount },
               { id: 'services', label: 'Services', icon: Terminal },
               { id: 'forums', label: 'Forums', icon: Users },
               { id: 'account', label: 'Profile', icon: Settings },
-              ...(user.role === 'admin' ? [{ id: 'admin', label: 'Admin Panel', icon: Shield }] : []),
-            ].filter(item => unlockedFeatures.includes(item.id) || user.role === 'admin').map((item) => (
+            ].filter(item => unlockedFeatures.includes(item.id)).map((item) => (
               <button
                 key={item.id}
                 onClick={() => setCurrentPage(item.id as any)}
-                className={`flex items-center gap-2 px-6 py-4 text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${
+                className={`flex items-center gap-2 px-6 py-4 text-xs font-bold uppercase tracking-widest transition-all border-b-2 relative ${
                   currentPage === item.id 
                     ? 'border-[#8b0000] text-[#00ff9d] bg-[#8b0000]/5' 
                     : 'border-transparent text-[#00ff9d]/40 hover:text-[#00ff9d] hover:bg-[#00ff9d]/5'
@@ -272,6 +555,11 @@ export default function App() {
               >
                 <item.icon className="w-4 h-4" />
                 {item.label}
+                {item.badge > 0 && (
+                  <span className="absolute top-2 right-2 flex h-4 w-4 items-center justify-center rounded-full bg-[#8b0000] text-[8px] text-white animate-pulse">
+                    {item.badge}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -313,6 +601,17 @@ export default function App() {
         isOpen={isTerminalOpen} 
         onClose={() => setIsTerminalOpen(false)} 
         onUnlock={handleUnlock}
+        onAdminAccess={() => setIsAdminGatewayOpen(true)}
+      />
+
+      {/* Admin Gateway */}
+      <AdminGateway 
+        isOpen={isAdminGatewayOpen} 
+        onClose={() => setIsAdminGatewayOpen(false)} 
+        onSuccess={() => {
+          setIsAdminGatewayOpen(false);
+          setCurrentPage('admin');
+        }}
       />
 
       {/* Footer */}
