@@ -309,6 +309,7 @@ export default function App() {
 
       {/* Hidden Terminal */}
       <HiddenTerminal 
+        user={user!}
         isOpen={isTerminalOpen} 
         onClose={() => setIsTerminalOpen(false)} 
         onUnlock={handleUnlock}

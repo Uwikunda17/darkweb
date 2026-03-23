@@ -16,7 +16,8 @@
         "achievements": { "type": "array", "items": { "type": "string" } },
         "streak": { "type": "number" },
         "lastActive": { "type": "string", "format": "date-time" },
-        "publicKey": { "type": "string" }
+        "publicKey": { "type": "string" },
+        "codename": { "type": "string" }
       },
       "required": ["uid", "email", "role"]
     },

@@ -14,6 +14,7 @@ export interface UserProfile {
   lastActive: string;
   publicKey?: string;
   privateKey?: string; // Only for system bots
+  codename?: string;
 }
 
 export interface TrainingModule {

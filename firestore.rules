@@ -2,6 +2,31 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {uid}
+    // Fields:
+    //   - uid: string (required) - Firebase Auth UID
+    //   - email: string (required) - User email
+    //   - displayName: string (required) - User display name
+    //   - role: string (required) - 'admin' or 'user'
+    //   - balance: number (required) - User balance
+    //   - debt: number (required) - User debt
+    //   - points: number (required) - User points
+    //   - completedModules: list (required) - List of module IDs
+    //   - achievements: list (required) - List of achievement IDs
+    //   - streak: number (required) - User daily streak
+    //   - lastActive: string (required) - ISO 8601 timestamp
+    //   - publicKey: string (optional) - PGP public key
+    //   - privateKey: string (optional) - PGP private key (encrypted)
+    //   - codename: string (optional) - Secret alias for terminal chat
+    //
+    // [Other collections documented as needed...]
+    // ===============================================================
+
+    // ===============================================================
     // Helper Functions
     // ===============================================================
     function isAuthenticated() {
@@ -30,7 +55,7 @@ service cloud.firestore {
     // Domain Validators
     // ===============================================================
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'role', 'balance', 'debt', 'points', 'completedModules', 'achievements', 'streak', 'lastActive', 'publicKey', 'privateKey']) &&
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'role', 'balance', 'debt', 'points', 'completedModules', 'achievements', 'streak', 'lastActive', 'publicKey', 'privateKey', 'codename']) &&
              data.uid is string &&
              data.email is string &&
              data.displayName is string &&
@@ -43,7 +68,8 @@ service cloud.firestore {
              data.streak is number &&
              data.lastActive is string &&
              (!('publicKey' in data) || data.publicKey is string) &&
-             (!('privateKey' in data) || data.privateKey is string);
+             (!('privateKey' in data) || data.privateKey is string) &&
+             (!('codename' in data) || (data.codename is string && data.codename.size() <= 50));
     }
 
     function isValidForumPost(data) {

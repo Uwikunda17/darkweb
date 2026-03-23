@@ -80,14 +80,14 @@ const Market: React.FC<MarketProps> = ({ user }) => {
         // Update user balance and debt
         const userRef = doc(db, 'users', user.uid);
         if (acceptDebt) {
-          const remainingPrice = selectedItem.price - user.balance;
+          const remainingDebt = selectedItem.price - user.balance;
           await updateDoc(userRef, {
             balance: 0,
-            debt: increment(remainingPrice)
+            debt: increment(remainingDebt)
           });
         } else {
           await updateDoc(userRef, {
-            balance: user.balance - selectedItem.price
+            balance: increment(-selectedItem.price)
           });
         }
         setPurchaseStatus('success');
