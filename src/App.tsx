@@ -258,7 +258,7 @@ export default function App() {
               { id: 'chat', label: 'Private Chat', icon: MessageSquare },
               { id: 'services', label: 'Services', icon: Terminal },
               { id: 'forums', label: 'Forums', icon: Users },
-              { id: 'account', label: 'Account', icon: Settings },
+              { id: 'account', label: 'Profile', icon: Settings },
               ...(user.role === 'admin' ? [{ id: 'admin', label: 'Admin Panel', icon: Shield }] : []),
             ].filter(item => unlockedFeatures.includes(item.id) || user.role === 'admin').map((item) => (
               <button

@@ -24,6 +24,8 @@ const Account: React.FC<AccountProps> = ({ user, onLogout }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [codename, setCodename] = useState(user.codename || '');
   const [isUpdatingCodename, setIsUpdatingCodename] = useState(false);
+  const [displayName, setDisplayName] = useState(user.displayName || '');
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
 
   useEffect(() => {
     const storedKeys = localStorage.getItem(`pgp_keys_${user.uid}`);
@@ -92,6 +94,22 @@ const Account: React.FC<AccountProps> = ({ user, onLogout }) => {
     }
   };
 
+  const updateProfile = async () => {
+    if (!displayName.trim() || displayName === user.displayName) return;
+    
+    setIsUpdatingProfile(true);
+    try {
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, { displayName: displayName.trim() });
+      alert('PROFILE UPDATED. YOUR ALIAS HAS BEEN SYNCHRONIZED.');
+    } catch (error) {
+      console.error('Failed to update profile:', error);
+      alert('FAILED TO UPDATE PROFILE.');
+    } finally {
+      setIsUpdatingProfile(false);
+    }
+  };
+
   const handleDeposit = async (e: React.FormEvent) => {
     e.preventDefault();
     const amount = parseFloat(depositAmount);
@@ -153,8 +171,8 @@ const Account: React.FC<AccountProps> = ({ user, onLogout }) => {
   return (
     <div className="max-w-4xl mx-auto space-y-12 animate-in fade-in duration-700">
       <header className="space-y-2">
-        <GlitchText text="ACCOUNT MANAGEMENT" className="text-3xl font-black text-[#00ff9d]" />
-        <p className="text-[#00ff9d]/50 text-xs uppercase tracking-widest">Secure Identity & Wallet Control</p>
+        <GlitchText text="USER PROFILE" className="text-3xl font-black text-[#00ff9d]" />
+        <p className="text-[#00ff9d]/50 text-xs uppercase tracking-widest">Manage Identity & Secure Credentials</p>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -165,8 +183,21 @@ const Account: React.FC<AccountProps> = ({ user, onLogout }) => {
               <div className="w-20 h-20 bg-[#8b0000]/20 rounded-full flex items-center justify-center border border-[#8b0000]/50 shadow-[0_0_20px_rgba(139,0,0,0.3)]">
                 <User className="w-10 h-10 text-[#8b0000]" />
               </div>
-              <div>
-                <h3 className="text-lg font-bold text-white">{user.displayName}</h3>
+              <div className="w-full space-y-2">
+                <input 
+                  type="text" 
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className="w-full bg-black border border-[#00ff9d]/20 rounded-sm px-3 py-1 text-center text-sm text-white focus:outline-none focus:border-[#00ff9d]"
+                  placeholder="Enter alias..."
+                />
+                <button 
+                  onClick={updateProfile}
+                  disabled={isUpdatingProfile || !displayName.trim() || displayName === user.displayName}
+                  className="text-[8px] text-[#00ff9d]/50 hover:text-[#00ff9d] uppercase tracking-widest disabled:opacity-30"
+                >
+                  {isUpdatingProfile ? 'Saving...' : 'Update Alias'}
+                </button>
                 <p className="text-[10px] text-[#00ff9d]/50 uppercase tracking-widest">{user.role}</p>
               </div>
             </div>

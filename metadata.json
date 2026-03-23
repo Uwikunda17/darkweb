@@ -1,5 +1,5 @@
 {
   "name": "ShadowNet Cybersecurity Simulator",
-  "description": "A gamified cybersecurity education platform with interactive training scenarios. Learn to spot phishing, ransomware, and social engineering in a safe, immersive environment.",
+  "description": "A gamified cybersecurity education platform with interactive training scenarios, a black market simulator, and a secure terminal-based chat system. Learn to spot phishing, ransomware, and social engineering in a safe, immersive environment.",
   "requestFramePermissions": []
 }
