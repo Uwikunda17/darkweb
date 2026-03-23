@@ -3,7 +3,7 @@ import { db } from '../firebase';
 import { collection, query, where, onSnapshot, addDoc, orderBy, doc, getDoc, getDocs, limit, Timestamp, updateDoc, setDoc } from 'firebase/firestore';
 import { Chat as ChatType, Message, UserProfile, OperationType, ChatCode } from '../types';
 import { handleFirestoreError } from '../utils';
-import { MessageSquare, Lock, Shield, Send, Terminal, AlertTriangle, Key, Users, Search, X, Eye, EyeOff } from 'lucide-react';
+import { MessageSquare, Lock, Shield, Send, Terminal, AlertTriangle, Key, Users, Search, X, Eye, EyeOff, Check, CheckCheck } from 'lucide-react';
 import { GlitchText } from '../components/TorLoading';
 import { format } from 'date-fns';
 import * as openpgp from 'openpgp';
@@ -24,6 +24,8 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
   const [userKeys, setUserKeys] = useState<{ publicKey: string; privateKey: string } | null>(null);
   const [recipientPublicKey, setRecipientPublicKey] = useState<string | null>(null);
   const [decryptedMessages, setDecryptedMessages] = useState<Record<string, string>>({});
+  const [isTyping, setIsTyping] = useState(false);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Initialize PGP Keys and Support Bot Key
@@ -92,6 +94,12 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
     const lastMsg = messages[messages.length - 1];
     if (lastMsg && lastMsg.senderId === user.uid) {
       const triggerBotResponse = async () => {
+        // Show typing indicator
+        const chatRef = doc(db, 'chats', activeChat.id);
+        await updateDoc(chatRef, {
+          [`typing.SUPPORT_SYSTEM`]: true
+        });
+
         // Wait a bit for "realism"
         await new Promise(resolve => setTimeout(resolve, 2000));
         
@@ -126,16 +134,21 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
               senderId: 'SUPPORT_SYSTEM',
               text: encrypted,
               timestamp: new Date().toISOString(),
-              encrypted: true
+              encrypted: true,
+              read: false
             });
 
             await updateDoc(doc(db, 'chats', activeChat.id), {
               lastMessage: 'Encrypted Message',
-              updatedAt: new Date().toISOString()
+              updatedAt: new Date().toISOString(),
+              [`typing.SUPPORT_SYSTEM`]: false
             });
           }
         } catch (err) {
           console.error('Bot response error:', err);
+          await updateDoc(chatRef, {
+            [`typing.SUPPORT_SYSTEM`]: false
+          });
         }
       };
       triggerBotResponse();
@@ -177,6 +190,14 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
       const fetchedMessages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message));
       setMessages(fetchedMessages);
       scrollToBottom();
+
+      // Mark unread messages as read
+      fetchedMessages.forEach(async (msg) => {
+        if (msg.senderId !== user.uid && !msg.read) {
+          const msgRef = doc(db, `chats/${activeChat.id}/messages`, msg.id);
+          await updateDoc(msgRef, { read: true });
+        }
+      });
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, `chats/${activeChat.id}/messages`);
     });
@@ -235,6 +256,31 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const handleTyping = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    setNewMessage(e.target.value);
+    if (!activeChat) return;
+
+    if (!isTyping) {
+      setIsTyping(true);
+      const chatRef = doc(db, 'chats', activeChat.id);
+      await updateDoc(chatRef, {
+        [`typing.${user.uid}`]: true
+      });
+    }
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+    typingTimeoutRef.current = setTimeout(async () => {
+      setIsTyping(false);
+      if (activeChat) {
+        const chatRef = doc(db, 'chats', activeChat.id);
+        await updateDoc(chatRef, {
+          [`typing.${user.uid}`]: false
+        });
+      }
+    }, 3000);
+  };
+
   const handleVerifyCode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatCode.trim()) return;
@@ -285,7 +331,11 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
         const newChatData = {
           participants: [user.uid, codeData.vendorId],
           lastMessage: 'Circuit established. Secure communication ready.',
-          updatedAt: new Date().toISOString()
+          updatedAt: new Date().toISOString(),
+          typing: {
+            [user.uid]: false,
+            [codeData.vendorId]: false
+          }
         };
         const chatRef = await addDoc(collection(db, 'chats'), newChatData);
         
@@ -295,7 +345,8 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
           senderId: 'system',
           text: 'END-TO-END ENCRYPTION ENABLED. PGP KEY EXCHANGE COMPLETE.',
           timestamp: new Date().toISOString(),
-          encrypted: true
+          encrypted: false,
+          read: true
         });
 
         setActiveChat({ id: chatRef.id, ...newChatData } as ChatType);
@@ -317,6 +368,14 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
 
     const messageText = newMessage.trim();
     setNewMessage('');
+    
+    // Clear typing indicator immediately
+    setIsTyping(false);
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    const chatRef = doc(db, 'chats', activeChat.id);
+    await updateDoc(chatRef, {
+      [`typing.${user.uid}`]: false
+    });
 
     try {
       // Encrypt for both self and recipient
@@ -335,13 +394,13 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
         senderId: user.uid,
         text: encrypted,
         timestamp: new Date().toISOString(),
-        encrypted: true
+        encrypted: true,
+        read: false
       };
 
       await addDoc(collection(db, `chats/${activeChat.id}/messages`), messageData);
       
       // Update chat last message
-      const chatRef = doc(db, 'chats', activeChat.id);
       await updateDoc(chatRef, {
         lastMessage: 'Encrypted Message',
         updatedAt: new Date().toISOString()
@@ -350,6 +409,9 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
       handleFirestoreError(err, OperationType.WRITE, `chats/${activeChat.id}/messages`);
     }
   };
+
+  const otherParticipantId = activeChat?.participants.find(p => p !== user.uid);
+  const isOtherTyping = activeChat?.typing?.[otherParticipantId || ''] || false;
 
   if (showCodeEntry && chats.length === 0) {
     return (
@@ -475,9 +537,9 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-6 space-y-4 no-scrollbar bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]">
-              {messages.map((msg, i) => (
+              {messages.map((msg) => (
                 <div 
-                  key={msg.id || i} 
+                  key={msg.id} 
                   className={`flex ${msg.senderId === user.uid ? 'justify-end' : 'justify-start'}`}
                 >
                   <div className={`max-w-[70%] space-y-1 ${msg.senderId === 'system' ? 'w-full flex flex-col items-center' : ''}`}>
@@ -492,19 +554,37 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
                             ? 'bg-[#00ff9d]/10 border border-[#00ff9d]/20 text-[#00ff9d]' 
                             : 'bg-[#8b0000]/10 border border-[#8b0000]/20 text-[#00ff9d]/90'
                         }`}>
-                          {msg.encrypted && (
-                            <Lock className="absolute -top-2 -right-2 w-3 h-3 text-[#00ff9d]/30 opacity-0 group-hover:opacity-100 transition-opacity" />
-                          )}
-                          {msg.encrypted ? (decryptedMessages[msg.id] || '[ENCRYPTED_DATA_STREAM]') : msg.text}
+                          <div className="flex items-center gap-2">
+                            {msg.encrypted && (
+                              <Lock className="w-3 h-3 text-[#00ff9d]/30 shrink-0" />
+                            )}
+                            <span>{msg.encrypted ? (decryptedMessages[msg.id] || '[ENCRYPTED_DATA_STREAM]') : msg.text}</span>
+                          </div>
                         </div>
-                        <p className={`text-[8px] text-[#00ff9d]/30 uppercase ${msg.senderId === user.uid ? 'text-right' : 'text-left'}`}>
-                          {format(new Date(msg.timestamp), 'HH:mm:ss')}
-                        </p>
+                        <div className={`flex items-center gap-2 ${msg.senderId === user.uid ? 'justify-end' : 'justify-start'}`}>
+                          <p className={`text-[8px] text-[#00ff9d]/30 uppercase`}>
+                            {format(new Date(msg.timestamp), 'HH:mm:ss')}
+                          </p>
+                          {msg.senderId === user.uid && (
+                            <div className="text-[#00ff9d]/30">
+                              {msg.read ? <CheckCheck className="w-3 h-3" /> : <Check className="w-3 h-3" />}
+                            </div>
+                          )}
+                        </div>
                       </>
                     )}
                   </div>
                 </div>
               ))}
+              {isOtherTyping && (
+                <div className="flex justify-start">
+                  <div className="bg-[#8b0000]/5 border border-[#8b0000]/10 px-3 py-1 rounded-sm">
+                    <p className="text-[8px] text-[#8b0000] font-bold animate-pulse uppercase tracking-widest">
+                      Vendor is typing...
+                    </p>
+                  </div>
+                </div>
+              )}
               <div ref={messagesEndRef} />
             </div>
 
@@ -514,7 +594,7 @@ const Chat: React.FC<ChatProps> = ({ user }) => {
                 type="text" 
                 placeholder="Type your encrypted message..." 
                 value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
+                onChange={handleTyping}
                 className="flex-1 bg-[#0d0d0d] border border-[#00ff9d]/20 rounded-sm py-3 px-4 text-xs focus:outline-none focus:border-[#00ff9d] transition-colors"
               />
               <button 

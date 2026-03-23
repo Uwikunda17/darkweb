@@ -80,6 +80,7 @@ export interface Chat {
   participants: string[];
   lastMessage: string;
   updatedAt: string;
+  typing?: Record<string, boolean>;
 }
 
 export interface Message {
@@ -89,6 +90,7 @@ export interface Message {
   text: string;
   timestamp: string;
   encrypted: boolean;
+  read?: boolean;
 }
 
 export interface MarketItem {

@@ -5,8 +5,9 @@ import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { UserProfile, UserRole } from './types';
 import { TorLoading } from './components/TorLoading';
 import { GlitchText } from './components/TorLoading';
-import { Shield, Lock, Terminal, ShoppingCart, MessageSquare, Users, Settings, LogOut, AlertTriangle, Info, Volume2, VolumeX, BookOpen } from 'lucide-react';
+import { Shield, Lock, Terminal, ShoppingCart, MessageSquare, Users, Settings, LogOut, AlertTriangle, Info, Volume2, VolumeX, BookOpen, Cpu } from 'lucide-react';
 import { generateOnionAddress, formatBtc } from './utils';
+import HiddenTerminal from './components/HiddenTerminal';
 
 // Pages (to be implemented)
 import Home from './pages/Home';
@@ -35,10 +36,26 @@ export default function App() {
   const [showRansomware, setShowRansomware] = useState(false);
   const [showPhishing, setShowPhishing] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(false);
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const [unlockedFeatures, setUnlockedFeatures] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('unlocked_features');
+      return saved ? JSON.parse(saved) : ['home', 'dashboard', 'services', 'forums', 'account', 'disclaimer'];
+    }
+    return ['home', 'dashboard', 'services', 'forums', 'account', 'disclaimer'];
+  });
 
   useEffect(() => {
     setOnionAddress(generateOnionAddress());
     
+    // Keyboard shortcut for terminal: Alt + T
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && e.key === 't') {
+        setIsTerminalOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
     // Randomly trigger "tricks"
     const triggerTricks = () => {
       if (Math.random() < 0.05) setShowRansomware(true);
@@ -86,7 +103,10 @@ export default function App() {
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, []);
 
   const handleLogin = async () => {
@@ -105,6 +125,15 @@ export default function App() {
     } catch (error) {
       console.error('Logout error:', error);
     }
+  };
+
+  const handleUnlock = (type: 'chat' | 'market') => {
+    setUnlockedFeatures(prev => {
+      const next = [...new Set([...prev, type])];
+      localStorage.setItem('unlocked_features', JSON.stringify(next));
+      return next;
+    });
+    setCurrentPage(type as any);
   };
 
   if (showTorLoading) {
@@ -231,7 +260,7 @@ export default function App() {
               { id: 'forums', label: 'Forums', icon: Users },
               { id: 'account', label: 'Account', icon: Settings },
               ...(user.role === 'admin' ? [{ id: 'admin', label: 'Admin Panel', icon: Shield }] : []),
-            ].map((item) => (
+            ].filter(item => unlockedFeatures.includes(item.id) || user.role === 'admin').map((item) => (
               <button
                 key={item.id}
                 onClick={() => setCurrentPage(item.id as any)}
@@ -260,7 +289,7 @@ export default function App() {
             "REMINDER: ALWAYS USE PGP ENCRYPTION FOR SENSITIVE DATA",
             "HACKER GROUP 'VOID' CLAIMS RESPONSIBILITY FOR DATA LEAK"
           ].map((news, i) => (
-            <span key={i} className="text-[10px] font-bold text-[#8b0000] uppercase tracking-widest">
+            <span key={`news-${i}`} className="text-[10px] font-bold text-[#8b0000] uppercase tracking-widest">
               [NEWS] {news}
             </span>
           ))}
@@ -274,9 +303,16 @@ export default function App() {
 
       {/* Tricks */}
       <AnimatePresence>
-        {showRansomware && <RansomwarePopup onClose={() => setShowRansomware(false)} />}
-        {showPhishing && <PhishingAlert onClose={() => setShowPhishing(false)} />}
+        {showRansomware && <RansomwarePopup key="ransomware-popup" onClose={() => setShowRansomware(false)} />}
+        {showPhishing && <PhishingAlert key="phishing-alert" onClose={() => setShowPhishing(false)} />}
       </AnimatePresence>
+
+      {/* Hidden Terminal */}
+      <HiddenTerminal 
+        isOpen={isTerminalOpen} 
+        onClose={() => setIsTerminalOpen(false)} 
+        onUnlock={handleUnlock}
+      />
 
       {/* Footer */}
       <footer className="mt-auto border-t border-[#00ff9d]/10 p-8 bg-[#0d0d0d]">
@@ -286,6 +322,10 @@ export default function App() {
             <p className="text-[10px]">For educational and entertainment purposes only. No actual illegal activities occur here.</p>
           </div>
           <div className="flex gap-6">
+            <button onClick={() => setIsTerminalOpen(true)} className="text-[10px] uppercase hover:text-[#00ff9d] transition-colors flex items-center gap-1">
+              <Cpu className="w-3 h-3" />
+              Hidden CLI
+            </button>
             <button onClick={() => setCurrentPage('disclaimer')} className="text-[10px] uppercase hover:text-[#00ff9d] transition-colors">Disclaimer</button>
             <span className="text-[10px] uppercase">Security: High</span>
             <span className="text-[10px] uppercase">Nodes: 3 Active</span>
