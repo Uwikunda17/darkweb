@@ -1,0 +1,170 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "uwikundac5@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'role', 'balance', 'debt', 'points', 'completedModules', 'achievements', 'streak', 'lastActive', 'publicKey']) &&
+             data.uid is string &&
+             data.email is string &&
+             data.displayName is string &&
+             data.role in ['admin', 'user'] &&
+             data.balance is number &&
+             data.debt is number &&
+             data.points is number &&
+             data.completedModules is list &&
+             data.achievements is list &&
+             data.streak is number &&
+             data.lastActive is string &&
+             (!('publicKey' in data) || data.publicKey is string);
+    }
+
+    function isValidForumPost(data) {
+      return hasOnlyAllowedFields(['title', 'content', 'authorId', 'authorName', 'timestamp', 'replies']) &&
+             data.title is string && data.title.size() < 200 &&
+             data.content is string && data.content.size() < 10000 &&
+             data.authorId is string &&
+             data.authorName is string &&
+             data.timestamp is string &&
+             data.replies is number;
+    }
+
+    function isValidModule(data) {
+      return hasOnlyAllowedFields(['id', 'title', 'description', 'category', 'difficulty', 'points', 'icon', 'scenario', 'educationalOutcome', 'redFlags', 'bestPractices', 'isActive']) &&
+             data.id is string &&
+             data.title is string &&
+             data.points is number &&
+             data.isActive is bool;
+    }
+
+    function isValidQuiz(data) {
+      return hasOnlyAllowedFields(['id', 'moduleId', 'questions']) &&
+             data.id is string &&
+             data.moduleId is string &&
+             data.questions is list;
+    }
+
+    function isValidProgress(data) {
+      return hasOnlyAllowedFields(['userId', 'moduleId', 'status', 'quizScore', 'completedAt']) &&
+             data.userId is string &&
+             data.moduleId is string &&
+             data.status in ['not-started', 'in-progress', 'completed'];
+    }
+
+    function isValidChatCode(data) {
+      return hasOnlyAllowedFields(['code', 'vendorId', 'isActive', 'createdBy']) &&
+             data.code is string && data.code.size() >= 8 && data.code.size() <= 12 &&
+             data.vendorId is string &&
+             data.isActive is bool &&
+             data.createdBy is string;
+    }
+
+    function isValidChat(data) {
+      return hasOnlyAllowedFields(['participants', 'lastMessage', 'updatedAt']) &&
+             data.participants is list &&
+             data.participants.size() >= 2;
+    }
+
+    function isValidMessage(data) {
+      return hasOnlyAllowedFields(['chatId', 'senderId', 'text', 'timestamp', 'encrypted']) &&
+             data.chatId is string &&
+             data.senderId is string &&
+             data.text is string && data.text.size() < 20000 &&
+             data.encrypted is bool;
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    // User Profiles
+    match /users/{userId} {
+      allow read: if isAuthenticated(); // Allow reading for PGP key exchange and profile lookups
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) && request.resource.data.role == 'user' || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) && request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    // Vendors
+    match /vendors/{vendorId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Chat Codes
+    match /chatCodes/{code} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Chats
+    match /chats/{chatId} {
+      allow read: if isAuthenticated() && (request.auth.uid in resource.data.participants || isAdmin());
+      allow create: if isAuthenticated() && isValidChat(request.resource.data) && (request.auth.uid in request.resource.data.participants || isAdmin());
+      allow update: if isAuthenticated() && isValidChat(request.resource.data) && (request.auth.uid in resource.data.participants || isAdmin());
+
+      // Messages sub-collection
+      match /messages/{messageId} {
+        allow read: if isAuthenticated() && (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants || isAdmin());
+        allow create: if isAuthenticated() && isValidMessage(request.resource.data) && (request.auth.uid == request.resource.data.senderId || isAdmin());
+      }
+    }
+
+    // Market Items
+    match /marketItems/{itemId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Training Modules
+    match /modules/{moduleId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Quizzes
+    match /quizzes/{quizId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // User Progress
+    match /userProgress/{progressId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidProgress(request.resource.data) && (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() && isValidProgress(request.resource.data) && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // Forum Posts
+    match /forumPosts/{postId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidForumPost(request.resource.data) && (request.resource.data.authorId == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() && isValidForumPost(request.resource.data) && (resource.data.authorId == request.auth.uid || isAdmin());
+    }
+  }
+}

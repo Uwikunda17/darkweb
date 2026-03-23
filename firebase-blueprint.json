@@ -1,0 +1,168 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Stores user information, role, and learning progress.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "balance": { "type": "number" },
+        "debt": { "type": "number" },
+        "points": { "type": "number" },
+        "completedModules": { "type": "array", "items": { "type": "string" } },
+        "achievements": { "type": "array", "items": { "type": "string" } },
+        "streak": { "type": "number" },
+        "lastActive": { "type": "string", "format": "date-time" },
+        "publicKey": { "type": "string" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "TrainingModule": {
+      "title": "Training Module",
+      "description": "Educational scenarios and content.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "difficulty": { "type": "string" },
+        "points": { "type": "number" },
+        "icon": { "type": "string" },
+        "scenario": { "type": "string" },
+        "educationalOutcome": { "type": "string" },
+        "redFlags": { "type": "array", "items": { "type": "string" } },
+        "bestPractices": { "type": "array", "items": { "type": "string" } },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["id", "title", "category", "points"]
+    },
+    "Quiz": {
+      "title": "Module Quiz",
+      "description": "Assessment for a training module.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "moduleId": { "type": "string" },
+        "questions": { "type": "array", "items": { "type": "object" } }
+      },
+      "required": ["id", "moduleId", "questions"]
+    },
+    "UserProgress": {
+      "title": "User Progress",
+      "description": "Tracks a user's progress through a module.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "moduleId": { "type": "string" },
+        "status": { "type": "string" },
+        "quizScore": { "type": "number" },
+        "completedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "moduleId", "status"]
+    },
+    "Vendor": {
+      "title": "Vendor",
+      "description": "Stores vendor information.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "rating": { "type": "number" },
+        "description": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "ChatCode": {
+      "title": "Chat Code",
+      "description": "Access codes for starting chats with vendors.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "vendorId": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["code", "vendorId", "isActive"]
+    },
+    "Chat": {
+      "title": "Chat Session",
+      "description": "Stores chat metadata.",
+      "type": "object",
+      "properties": {
+        "participants": { "type": "array", "items": { "type": "string" } },
+        "lastMessage": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["participants"]
+    },
+    "Message": {
+      "title": "Chat Message",
+      "description": "Individual messages within a chat.",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "text": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "encrypted": { "type": "boolean" }
+      },
+      "required": ["chatId", "senderId", "text", "timestamp"]
+    },
+    "MarketItem": {
+      "title": "Market Item",
+      "description": "Items listed in the black market.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "price": { "type": "number" },
+        "category": { "type": "string" },
+        "vendorId": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["title", "price", "vendorId"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "UserProfile",
+      "description": "User profiles."
+    },
+    "/vendors/{vendorId}": {
+      "schema": "Vendor",
+      "description": "Vendor listings."
+    },
+    "/chatCodes/{code}": {
+      "schema": "ChatCode",
+      "description": "Active chat access codes."
+    },
+    "/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Active chat sessions."
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Messages in a chat."
+    },
+    "/marketItems/{itemId}": {
+      "schema": "MarketItem",
+      "description": "Black market items."
+    },
+    "/modules/{moduleId}": {
+      "schema": "TrainingModule",
+      "description": "Training modules."
+    },
+    "/quizzes/{quizId}": {
+      "schema": "Quiz",
+      "description": "Module quizzes."
+    },
+    "/userProgress/{progressId}": {
+      "schema": "UserProgress",
+      "description": "User progress tracking."
+    }
+  }
+}
